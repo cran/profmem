@@ -206,12 +206,13 @@ hr {
 
 <h2>Introduction</h2>
 
-<p>The <code>profmem()</code> function of the <a href="https://github.com/HenrikBengtsson/profmem">profmem</a> package provides an easy way to profile the memory usage of an R expression.  It logs all memory allocations done in R.  Profiling memory allocations is helpful when we, for instance, try to understand why a certain piece of R code consumes more memory than expected.</p>
+<p>The <code>profmem()</code> function of the <a href="https://cran.r-project.org/package=profmem">profmem</a> package provides an easy way to profile the memory usage of an R expression.  It logs all memory allocations done in R.  Profiling memory allocations is helpful when we, for instance, try to understand why a certain piece of R code consumes more memory than expected.</p>
 
 <p>The <code>profmem()</code> function builds upon existing memory profiling features available in R.  It logs <em>every</em> memory allocation done by plain R code as well as those done by native code such as C and Fortran.  For each entry, it records the size (in bytes) and the name of the functions on the call stack.
 For example,</p>
 
 <pre><code class="r">&gt; library(&quot;profmem&quot;)
+&gt; options(profmem.threshold = 2000)
 &gt; p &lt;- profmem({
 +     x &lt;- integer(1000)
 +     Y &lt;- matrix(rnorm(n = 10000), nrow = 100)
@@ -222,104 +223,81 @@ Rprofmem memory profiling of:
     x &lt;- integer(1000)
     Y &lt;- matrix(rnorm(n = 10000), nrow = 100)
 }
-Memory allocations:
-       bytes               calls
-1       4040           integer()
-2      80040 matrix() -&gt; rnorm()
-3       2544 matrix() -&gt; rnorm()
-4      80040            matrix()
-total 166664                    
+Memory allocations (&gt;= 2000 bytes):
+       what  bytes               calls
+1     alloc   4040           integer()
+2     alloc  80040 matrix() -&gt; rnorm()
+3     alloc   2544 matrix() -&gt; rnorm()
+4     alloc  80040            matrix()
+total       166664                    
 </code></pre>
 
-<p>From this, we find that 4040 bytes are allocated for integer vector <code>x</code>, which is because each integer value occupies 4 bytes of memory.  The additional 40 bytes are due to the internal data structure used for each variable R.  The size of this allocation is also be confirmed by the value of <code>object.size(x)</code>.
+<p>From this, we find that 4040 bytes are allocated for integer vector <code>x</code>, which is because each integer value occupies 4 bytes of memory.  The additional 40 bytes are due to the internal data structure used for each variable R.  The size of this allocation can also be confirmed by the value of <code>object.size(x)</code>.
 We also see that <code>rnorm()</code>, which is called via <code>matrix()</code>, allocates 80040 + 2544 bytes, where the first one reflects the 10000 double values each occupying 8 bytes.  The second one reflects some unknown allocation done internally by the native code that <code>rnorm()</code> uses.
-Finally, the last entry reflects the memory allocation of 80040 bytes done by <code>matrix()</code> itself.</p>
+Finally, the following entry reflects the memory allocation of 80040 bytes done by <code>matrix()</code> itself.</p>
 
 <h2>An example where memory profiling can make a difference</h2>
 
-<p>Assume we have an integer vector</p>
+<p>Assume we want to set a 100-by-100 matrix with missing values except for element (1,1) that we assign to be zero.  This can be done as:</p>
 
-<pre><code class="r">&gt; x &lt;- sample(1:10000, size = 10000)
-&gt; str(x)
- int [1:10000] 2469 5667 1297 3570 7780 1149 1477 5732 8764 6244 ...
+<pre><code class="r">&gt; x &lt;- matrix(nrow = 100, ncol = 100)
+&gt; x[1, 1] &lt;- 0
+&gt; x[1:3, 1:3]
+     [,1] [,2] [,3]
+[1,]    0   NA   NA
+[2,]   NA   NA   NA
+[3,]   NA   NA   NA
 </code></pre>
 
-<p>and we would like to identify all elements less than 5000, which can be done as</p>
-
-<pre><code class="r">&gt; small &lt;- (x &lt; 5000)
-&gt; str(small)
- logi [1:10000] TRUE FALSE TRUE TRUE FALSE TRUE ...
-</code></pre>
-
-<p>This looks fairly innocent, but it turns out that it is unnecessarily inefficient - both when it comes to memory and speed.  The reason is that <code>5000</code> is of data type double whereas <code>x</code> is of type integer;</p>
-
-<pre><code class="r">&gt; typeof(x)
-[1] &quot;integer&quot;
-&gt; typeof(5000)
-[1] &quot;double&quot;
-</code></pre>
-
-<p>Because of this difference in types, R chooses to first coerce <code>x</code> into a double vector before comparing with another double (here <code>5000</code>).  Having to coerce to another data type consumes extra memory, which we can see if we profile the memory:</p>
+<p>This looks fairly innocent, but it turns out that it is very inefficient - both when it comes to memory and speed.  The reason is that the default value used by <code>matrix()</code> is <code>NA</code>, which is of type <em>logical</em>.  This means that initially <code>x</code> is a <em>logical</em> matrix not a <em>numeric</em> matrix.  When we the assign the (1,1) element the value <code>0</code>, which is a <em>numeric</em>, the matrix first has to be coerced to <em>numeric</em> internally and then the zero is assigned.  Profiling the memory will reveal this;</p>
 
 <pre><code class="r">&gt; p &lt;- profmem({
-+     small &lt;- (x &lt; 5000)
++     x &lt;- matrix(nrow = 100, ncol = 100)
++     x[1, 1] &lt;- 0
 + })
-&gt; p
-Rprofmem memory profiling of:
-{
-    small &lt;- (x &lt; 5000)
-}
-Memory allocations:
-       bytes      calls
-1      80040 &lt;internal&gt;
-2      40040 &lt;internal&gt;
-total 120080           
+&gt; print(p, expr = FALSE)
+Memory allocations (&gt;= 2000 bytes):
+       what  bytes      calls
+1     alloc  40040   matrix()
+2     alloc  80040 &lt;internal&gt;
+total       120080           
 </code></pre>
 
-<p>But before anything else, the size of <code>x</code> and <code>small</code> are:</p>
+<p>The first entry is for the logical matrix with 10,000 elements (= 4 * 10,000 bytes + small header) that we allocate.  The second entry reveals the coercion of this matrix to a numeric matrix (= 8 * 10,000 elements + small header).</p>
 
-<pre><code class="r">&gt; object.size(x)
-40040 bytes
-&gt; object.size(small)
-40040 bytes
-</code></pre>
+<p>To avoid this, we make sure to create a numeric matrix upfront as:</p>
 
-<p>which is because <code>x</code> is of type integer (4 bytes per element) and <code>small</code> is of type logical (also 4 bytes per element).</p>
-
-<p>Now, due the coercion of <code>x</code> to double, an internal double vector of the same length as <code>x</code> is temporarily created (and populated with values from <code>x</code>).  This is what is reported in the first row of <code>p</code>.  Since each double value occupies 8 bytes of memory, the size of this internal object is 80040 bytes.
-At this point, R is ready to compare the internal double vector against the double value <code>5000</code>.  The result of this comparison will be stored in a logical vector of length 10000.  This is what is reported in the second row of <code>p</code>.  This logical vector is assigned to variable <code>small</code> at the end.</p>
-
-<p>We can avoid the coercion to double if we compare <code>x</code> to an integer value (<code>5000L</code>) instead of a double value (<code>5000</code>), which is also confirmed if we profile memory allocations;</p>
-
-<pre><code class="r">&gt; p2 &lt;- profmem({
-+     small &lt;- (x &lt; 5000)
+<pre><code class="r">&gt; p &lt;- profmem({
++     x &lt;- matrix(NA_real_, nrow = 100, ncol = 100)
++     x[1, 1] &lt;- 0
 + })
-&gt; p2
-Rprofmem memory profiling of:
-{
-    small &lt;- (x &lt; 5000L)
-}
-Memory allocations:
-      bytes      calls
-1     40040 &lt;internal&gt;
-total 40040           
+&gt; print(p, expr = FALSE)
+Memory allocations (&gt;= 2000 bytes):
+       what bytes    calls
+1     alloc 80040 matrix()
+total       80040         
 </code></pre>
 
-<p>In this case, all that is allocated is the memory for holding the logical result that is later assigned to <code>small</code>.</p>
-
-<p>The above illustrates the value of profiling your R code&#39;s memory usages and thanks to <code>profmem()</code> we can compare the amount of memory allocated of two alternative implementations.  Being able to write memory-efficient R code becomes particularly important when working with large data sets, where an inefficient implementation may even prevent us from performing an analysis because we end up running out of memory.  Moreover, each memory allocation will eventually have to be deallocated and in R this is done automatically by the garbage collector, which runs in the background and recovers any blocks of memory that are allocated but no longer in use.  Garbage collection takes time and therefore slows down the overall processing in R.  Using the <a href="https://cran.r-project.org/package=microbenchmark">microbenchmark</a> package, we can quantify the extra overhead on the garbage collection that is introduced due to the coercion of <code>x</code> to double;</p>
+<p>Using the <a href="https://cran.r-project.org/package=microbenchmark">microbenchmark</a> package, we can also quantify the extra overhead in processing time that is introduced due to the logical-to-numeric coercion;</p>
 
 <pre><code class="r">&gt; library(&quot;microbenchmark&quot;)
-&gt; stats &lt;- microbenchmark(double = (x &lt; 5000), integer = (x &lt; 
-+     5000), times = 100, unit = &quot;ms&quot;)
+&gt; stats &lt;- microbenchmark(bad = {
++     x &lt;- matrix(nrow = 100, ncol = 100)
++     x[1, 1] &lt;- 0
++ }, good = {
++     x &lt;- matrix(NA_real_, nrow = 100, ncol = 100)
++     x[1, 1] &lt;- 0
++ }, times = 100, unit = &quot;ms&quot;)
 &gt; stats
 Unit: milliseconds
-    expr   min    lq  mean median    uq   max neval
-  double 0.035 0.036 0.060  0.062 0.065 0.876   100
- integer 0.017 0.017 0.022  0.018 0.027 0.037   100
+ expr   min    lq  mean median    uq   max neval cld
+  bad 0.015 0.016 0.047  0.016 0.043 1.457   100   a
+ good 0.010 0.011 0.016  0.011 0.016 0.036   100   a
 </code></pre>
 
-<p>Comparing integer vector <code>x</code> to an integer is in this case approximately twice as fast as comparing to a double.  This is also true for vectors with many more elements than 10000.</p>
+<p>The ineffcient approach is 1.5-2 times slower than the efficient one.</p>
+
+<p>The above illustrates the value of profiling your R code&#39;s memory usage and thanks to <code>profmem()</code> we can compare the amount of memory allocated of two alternative implementations.  Being able to write memory-efficient R code becomes particularly important when working with large data sets, where an inefficient implementation may even prevent us from performing an analysis because we end up running out of memory.  Moreover, each memory allocation will eventually have to be deallocated and in R this is done automatically by the garbage collector, which runs in the background and recovers any blocks of memory that are allocated but no longer in use.  Garbage collection takes time and therefore slows down the overall processing in R even further.</p>
 
 <h2>What is logged?</h2>
 
@@ -328,7 +306,7 @@ Allocations <em>not</em> logged are those done by non-R native libraries or R pa
 
 <h3>Difference between <code>utils::Rprofmem()</code> and <code>utils::Rprof(memory.profiling = TRUE)</code></h3>
 
-<p>In addition to <code>utils::Rprofmem()</code>, R also provides <code>utils::Rprof(memory.profiling = TRUE)</code>.  Despite the close similarity of their names, the use completely different approaches for profiling the memory usage.  As explained above, the former logs <em>all individual</em> (<code>allocVector3()</code>) memory allocation whereas the latter probes the <em>total</em> memory usage of R at regular time intervals.  If memory is allocated and deallocated between two such probing time points, <code>utils::Rprof(memory.profiling = TRUE)</code> will not log that memory whereas <code>utils::Rprofmem()</code> will pick it up.  On the other hand, with <code>utils::Rprofmem()</code> it is not possible to quantify the total memory <em>usage</em> at a given time because it only logs <em>allocations</em> and does therefore not reflect deallocations done by the garbage collector.</p>
+<p>In addition to <code>utils::Rprofmem()</code>, R also provides <code>utils::Rprof(memory.profiling = TRUE)</code>.  Despite the close similarity of their names, they use completely different approaches for profiling the memory usage.  As explained above, the former logs <em>all individual</em> (<code>allocVector3()</code>) memory allocation whereas the latter probes the <em>total</em> memory usage of R at regular time intervals.  If memory is allocated and deallocated between two such probing time points, <code>utils::Rprof(memory.profiling = TRUE)</code> will not log that memory whereas <code>utils::Rprofmem()</code> will pick it up.  On the other hand, with <code>utils::Rprofmem()</code> it is not possible to quantify the total memory <em>usage</em> at a given time because it only logs <em>allocations</em> and does therefore not reflect deallocations done by the garbage collector.</p>
 
 <h2>Requirements</h2>
 
@@ -341,11 +319,9 @@ profmem
 
 <p>The overhead of running an R installation with memory profiling enabled compared to one without is neglectable / non-measurable.</p>
 
-<p>Volunteers of the R Project provide pre-built binaries of the R software available via CRAN at <a href="https://cran.r-project.org/">https://cran.r-project.org/</a>.  Among these, it has been confirmed that the R 3.3.1 binaries for Windows and the ones for the Debian Linux distribution have been built with memory profiling enabled.  It is possible that it is also enabled by default for the other Linux distributions as well as the macOS binaries, but this has to be confirmed.</p>
+<p>Volunteers of the R Project provide and distribute pre-built binaries of the R software for all the major operating system via <a href="https://cran.r-project.org/">CRAN</a>.  <a href="https://github.com/HenrikBengtsson/profmem/issues/2">It has been confirmed</a> that the R binaries for Windows, macOS (both by CRAN and by the AT&amp;T Research Lab), and for Linux (*) all have been built with memory profiling enabled.  (*) For Linux, this has been confirmed for the Debian/Ubuntu distribution but yet not for the other Linux distributions.</p>
 
-<h3>Enabling memory profiling</h3>
-
-<p>To enable memory profiling (only needed if <code>capabilities(&quot;profmem&quot;)</code> returns <code>FALSE</code>), R needs to be <em>configured</em> and <em>built</em> from source using:</p>
+<p>In all other cases, to enable memory profiling, which is <em>only</em> needed if <code>capabilities(&quot;profmem&quot;)</code> returns <code>FALSE</code>, R needs to be <em>configured</em> and <em>built from source</em> using:</p>
 
 <pre><code class="sh">$ ./configure --enable-memory-profiling
 $ make
@@ -355,7 +331,7 @@ $ make
 
 <hr/>
 
-<p>Copyright Henrik Bengtsson, 2016</p>
+<p>Copyright Henrik Bengtsson, 2016-2018</p>
 
 </body>
 
