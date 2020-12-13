@@ -225,16 +225,16 @@ Rprofmem memory profiling of:
 }
 Memory allocations (&gt;= 2000 bytes):
        what  bytes               calls
-1     alloc   4040           integer()
-2     alloc  80040 matrix() -&gt; rnorm()
-3     alloc   2544 matrix() -&gt; rnorm()
-4     alloc  80040            matrix()
-total       166664                    
+1     alloc   4048           integer()
+2     alloc  80048 matrix() -&gt; rnorm()
+3     alloc   2552 matrix() -&gt; rnorm()
+4     alloc  80048            matrix()
+total       166696                    
 </code></pre>
 
-<p>From this, we find that 4040 bytes are allocated for integer vector <code>x</code>, which is because each integer value occupies 4 bytes of memory.  The additional 40 bytes are due to the internal data structure used for each variable R.  The size of this allocation can also be confirmed by the value of <code>object.size(x)</code>.
-We also see that <code>rnorm()</code>, which is called via <code>matrix()</code>, allocates 80040 + 2544 bytes, where the first one reflects the 10000 double values each occupying 8 bytes.  The second one reflects some unknown allocation done internally by the native code that <code>rnorm()</code> uses.
-Finally, the following entry reflects the memory allocation of 80040 bytes done by <code>matrix()</code> itself.</p>
+<p>From this, we find that 4048 bytes are allocated for integer vector <code>x</code>, which is because each integer value occupies 4 bytes of memory.  The additional 40 bytes are due to the internal data structure used for each variable R.  The size of this allocation can also be confirmed by the value of <code>object.size(x)</code>.
+We also see that <code>rnorm()</code>, which is called via <code>matrix()</code>, allocates 80048 + 2552 bytes, where the first one reflects the 10000 double values each occupying 8 bytes.  The second one reflects some unknown allocation done internally by the native code that <code>rnorm()</code> uses.
+Finally, the following entry reflects the memory allocation of 80048 bytes done by <code>matrix()</code> itself.</p>
 
 <h2>An example where memory profiling can make a difference</h2>
 
@@ -258,9 +258,9 @@ Finally, the following entry reflects the memory allocation of 80040 bytes done 
 &gt; print(p, expr = FALSE)
 Memory allocations (&gt;= 2000 bytes):
        what  bytes      calls
-1     alloc  40040   matrix()
-2     alloc  80040 &lt;internal&gt;
-total       120080           
+1     alloc  40048   matrix()
+2     alloc  80048 &lt;internal&gt;
+total       120096           
 </code></pre>
 
 <p>The first entry is for the logical matrix with 10,000 elements (= 4 * 10,000 bytes + small header) that we allocate.  The second entry reveals the coercion of this matrix to a numeric matrix (= 8 * 10,000 elements + small header).</p>
@@ -274,8 +274,8 @@ total       120080
 &gt; print(p, expr = FALSE)
 Memory allocations (&gt;= 2000 bytes):
        what bytes    calls
-1     alloc 80040 matrix()
-total       80040         
+1     alloc 80048 matrix()
+total       80048         
 </code></pre>
 
 <p>Using the <a href="https://cran.r-project.org/package=microbenchmark">microbenchmark</a> package, we can also quantify the extra overhead in processing time that is introduced due to the logical-to-numeric coercion;</p>
@@ -290,12 +290,12 @@ total       80040
 + }, times = 100, unit = &quot;ms&quot;)
 &gt; stats
 Unit: milliseconds
- expr   min    lq  mean median    uq   max neval cld
-  bad 0.015 0.016 0.047  0.016 0.043 1.457   100   a
- good 0.010 0.011 0.016  0.011 0.016 0.036   100   a
+ expr   min    lq  mean median    uq   max neval
+  bad 0.028 0.066 0.069  0.070 0.072 0.092   100
+ good 0.012 0.035 0.037  0.037 0.040 0.057   100
 </code></pre>
 
-<p>The ineffcient approach is 1.5-2 times slower than the efficient one.</p>
+<p>The inefficient approach is 1.5-2 times slower than the efficient one.</p>
 
 <p>The above illustrates the value of profiling your R code&#39;s memory usage and thanks to <code>profmem()</code> we can compare the amount of memory allocated of two alternative implementations.  Being able to write memory-efficient R code becomes particularly important when working with large data sets, where an inefficient implementation may even prevent us from performing an analysis because we end up running out of memory.  Moreover, each memory allocation will eventually have to be deallocated and in R this is done automatically by the garbage collector, which runs in the background and recovers any blocks of memory that are allocated but no longer in use.  Garbage collection takes time and therefore slows down the overall processing in R even further.</p>
 
